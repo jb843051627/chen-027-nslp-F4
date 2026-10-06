@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.pollix.at/thymeleaf/shiro">
+<head>
+    <th:block th:include="include :: header('声环境监测点位名册')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <form class="layui-form" action="" id="roster-form">
+            <div class="layui-form-item">
+                <label class="layui-form-label">年度</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="annual" placeholder="如 2026，0 摆旧纸簿行" class="layui-input">
+                </div>
+                <label class="layui-form-label">点位码</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="pointNo" placeholder="前缀/全等都认" class="layui-input">
+                </div>
+                <label class="layui-form-label">区册代号</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="zoneNo" placeholder="前缀/全等都认" class="layui-input">
+                </div>
+                <label class="layui-form-label">区层类别</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="zoneKind" placeholder="甲层/乙层/丙层/丁层" class="layui-input">
+                </div>
+            </div>
+            <div class="layui-form-item">
+                <label class="layui-form-label">只认全等</label>
+                <div class="layui-input-inline" style="width:90px">
+                    <input type="checkbox" name="exact" value="true" lay-skin="switch">
+                </div>
+                <label class="layui-form-label">值守本层</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="viewerLayer" placeholder="本层值守岗填本层类别" class="layui-input">
+                </div>
+                <label class="layui-form-label">视图摆法</label>
+                <div class="layui-input-inline" style="width:150px">
+                    <select name="view">
+                        <option value="byKind">按区层类别</option>
+                        <option value="byZone">按区册代号</option>
+                        <option value="byIntake">按入册情形</option>
+                    </select>
+                </div>
+                <button class="pear-btn pear-btn-md pear-btn-primary" lay-submit lay-filter="roster-query">
+                    <i class="layui-icon layui-icon-search"></i> 查询
+                </button>
+                <button shiro:hasPermission="nslp:nslpPoint:add" type="button"
+                        class="pear-btn pear-btn-md" lay-event="add">
+                    <i class="layui-icon layui-icon-add-1"></i> 建档
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-body">
+        <div class="layui-row layui-col-space15">
+            <div class="layui-col-md4">
+                <div class="layui-card"><div class="layui-card-body">
+                    <b>在册处数（页首·唯一底数）</b>
+                    <h2 id="num-registered">-</h2>
+                </div></div>
+            </div>
+            <div class="layui-col-md4">
+                <div class="layui-card"><div class="layui-card-body">
+                    <b>在走处数（没压卡没叫停）</b>
+                    <h2 id="num-walking">-</h2>
+                </div></div>
+            </div>
+            <div class="layui-col-md4">
+                <div class="layui-card"><div class="layui-card-body">
+                    <b>三种视图处数对账</b>
+                    <div id="view-groups" style="font-size:13px"></div>
+                </div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-body">
+        <table id="roster-table" lay-filter="roster-table"></table>
+        <div style="margin-top:10px">
+            <button class="pear-btn pear-btn-md" id="prev-page">上一页</button>
+            <span id="page-info">第 - 页</span>
+            <button class="pear-btn pear-btn-md" id="next-page">下一页</button>
+            <span style="margin-left:12px;color:#888">每页几条由区局配置，页面改不了</span>
+        </div>
+    </div>
+</div>
+
+<script type="text/html" id="roster-bar">
+    <button shiro:hasPermission="nslp:nslpPoint:edit" class="pear-btn pear-btn-primary pear-btn-sm" lay-event="advance">推进</button>
+    <button shiro:hasPermission="nslp:nslpPoint:edit" class="pear-btn pear-btn-warming pear-btn-sm" lay-event="rollback">收回</button>
+    <button shiro:hasPermission="nslp:nslpPoint:edit" class="pear-btn pear-btn-sm" lay-event="halt">叫停</button>
+    <button shiro:hasPermission="nslp:nslpPoint:add" class="pear-btn pear-btn-sm" lay-event="edit">改行</button>
+    <button shiro:hasPermission="nslp:nslpPoint:remove" class="pear-btn pear-btn-danger pear-btn-sm" lay-event="removePoint">撤行</button>
+</script>
+
+<script>
+    layui.use(['table', 'form', 'jquery', 'layer'], function () {
+        let table = layui.table, form = layui.form, $ = layui.jquery, layer = layui.layer;
+        let MODULE_PATH = rootPath + "/NslpPointController";
+        let pageNum = 1, lastTotal = 0, pageSize = 10;
+
+        let walkText = function (v) {
+            if (v === 0) return '待测';
+            if (v === 1) return '已测';
+            if (v === 2) return '压卡（到头）';
+            return '旧纸簿行（步数空）';
+        };
+
+        function loadRoster() {
+            let field = {};
+            $.each($('#roster-form').serializeArray(), function (_, kv) {
+                field[kv.name] = kv.value;
+            });
+            field.pageNum = pageNum;
+            let checked = $('#roster-form input[name="exact"]').prop('checked');
+            if (checked) field.exact = true; else delete field.exact;
+            $.get(MODULE_PATH + '/roster', field, function (res) {
+                if (res.code !== 200) { layer.msg(res.msg, {icon: 2}); return; }
+                let d = res.data;
+                pageSize = d.pageSize; lastTotal = d.total;
+                $('#num-registered').text(d.registeredNum);
+                $('#num-walking').text(d.walkingNum);
+                $('#page-info').text('第 ' + d.pageNum + ' 页 / 每页 ' + d.pageSize + ' 条 / 共 ' + d.total + ' 处');
+                let groups = (d.groups || []).map(function (g) {
+                    return g.key + '：' + g.num + ' 处';
+                }).join('　');
+                $('#view-groups').html(groups || '（本视图留空——本年度一行没建是合法结果）');
+                table.render({
+                    elem: '#roster-table',
+                    data: d.rows,
+                    page: false, limit: d.pageSize,
+                    cols: [[
+                        {title: 'ID', field: 'id', align: 'center', hide: true},
+                        {title: '年度', field: 'annual', align: 'center', width: 80,
+                            templet: function (r) { return r.annual == null ? '旧簿' : r.annual; }},
+                        {title: '点位码', field: 'pointNo', align: 'left'},
+                        {title: '区册代号', field: 'zoneNo', align: 'left'},
+                        {title: '区册全称', field: 'zoneName', align: 'left'},
+                        {title: '核定应测', field: 'needNum', align: 'center', width: 90},
+                        {title: '已达标', field: 'gotNum', align: 'center', width: 80},
+                        {title: '还差几回', field: 'lackNum', align: 'center', width: 90},
+                        {title: '在走', field: 'walkStatus', align: 'center', width: 110,
+                            templet: function (r) {
+                                let t = walkText(r.walkStatus);
+                                return (r.halted === 1) ? '已叫停' : t;
+                            }},
+                        {title: '建档人', field: 'createBy', align: 'center', width: 100},
+                        {title: '最近改动人', field: 'updateBy', align: 'center', width: 100},
+                        {title: '来路', field: 'srcKind', align: 'center', width: 110},
+                        {title: '操作', toolbar: '#roster-bar', align: 'center', width: 300}
+                    ]],
+                    skin: 'line'
+                });
+            });
+        }
+
+        form.on('submit(roster-query)', function () { pageNum = 1; loadRoster(); return false; });
+        $('#prev-page').on('click', function () { if (pageNum > 1) { pageNum--; loadRoster(); } });
+        $('#next-page').on('click', function () {
+            if (pageNum * pageSize < lastTotal) { pageNum++; loadRoster(); }
+        });
+
+        function registerDialog(row) {
+            layer.open({
+                type: 1, title: row ? '改行（指自己按更新办）' : '建档（建行过五道筛）',
+                area: ['620px', '560px'], shade: 0.1,
+                content: $('#register-panel'),
+                btn: ['提交', '取消'],
+                success: function () {
+                    $('#reg-id').val(row ? row.id : '');
+                    $('#reg-pointNo').val(row ? row.pointNo : '');
+                    $('#reg-annual').val(row ? (row.annual == null ? '' : row.annual) : '');
+                    $('#reg-zoneNo').val(row ? row.zoneNo : '');
+                    $('#reg-zoneName').val(row ? row.zoneName : '');
+                    $('#reg-needNum').val(row ? row.needNum : '');
+                    $('#reg-gotNum').val(row ? row.gotNum : '0');
+                    $('#reg-content').val(row ? row.content : '');
+                    $('#reg-srcKind').val(row ? row.srcKind : '建档岗建');
+                },
+                yes: function (idx) {
+                    let data = $('#register-form').serialize();
+                    $.post(MODULE_PATH + '/register', data, function (res) {
+                        if (res.code === 200) { layer.close(idx); layer.msg('落库成功', {icon: 1}); loadRoster(); }
+                        else layer.msg(res.msg, {icon: 2, time: 4000});
+                    }).fail(function (xhr) {
+                        let m = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : xhr.responseText;
+                        layer.msg(m, {icon: 2, time: 5000});
+                    });
+                }
+            });
+        }
+
+        table.on('tool(roster-table)', function (obj) {
+            let r = obj.data;
+            if (obj.event === 'edit') { registerDialog(r); return; }
+            let url = {advance: '/advanceWalk', rollback: '/rollbackWalk',
+                       halt: '/halt', removePoint: '/removePoint'}[obj.event];
+            if (!url) return;
+            let data = {id: r.id};
+            if (obj.event === 'halt') {
+                layer.prompt({title: '叫停缘由（可空）'}, function (val, i) {
+                    data.reason = val; layer.close(i); post();
+                });
+            } else {
+                layer.confirm('对点位 ' + r.pointNo + ' 执行「' + obj.event + '」？', {icon: 3}, function (i) {
+                    layer.close(i); post();
+                });
+            }
+            function post() {
+                let type = obj.event === 'removePoint' ? 'DELETE' : 'POST';
+                $.ajax({url: MODULE_PATH + url, type: type, data: data,
+                    success: function (res) {
+                        if (res.code === 200) { layer.msg('成了', {icon: 1}); loadRoster(); }
+                        else layer.msg(res.msg, {icon: 2, time: 4000});
+                    }});
+            }
+        });
+
+        $('#roster-form button[lay-event="add"]').on('click', function () { registerDialog(null); });
+
+        loadRoster();
+    });
+</script>
+
+<div id="register-panel" style="display:none;padding:18px">
+    <form id="register-form" class="layui-form">
+        <input type="hidden" name="id" id="reg-id">
+        <div class="layui-form-item"><label class="layui-form-label">点位码</label>
+            <div class="layui-input-block"><input class="layui-input" name="pointNo" id="reg-pointNo"></div></div>
+        <div class="layui-form-item"><label class="layui-form-label">年度</label>
+            <div class="layui-input-block"><input class="layui-input" name="annual" id="reg-annual" placeholder="如 2026"></div></div>
+        <div class="layui-form-item"><label class="layui-form-label">区册代号</label>
+            <div class="layui-input-block"><input class="layui-input" name="zoneNo" id="reg-zoneNo"></div></div>
+        <div class="layui-form-item"><label class="layui-form-label">区册全称</label>
+            <div class="layui-input-block"><input class="layui-input" name="zoneName" id="reg-zoneName" placeholder="对不齐以区册底为准"></div></div>
+        <div class="layui-form-item"><label class="layui-form-label">核定应测</label>
+            <div class="layui-input-block"><input class="layui-input" name="needNum" id="reg-needNum" placeholder="整数，必填"></div></div>
+        <div class="layui-form-item"><label class="layui-form-label">已达标</label>
+            <div class="layui-input-block"><input class="layui-input" name="gotNum" id="reg-gotNum" placeholder="整数，空着按 0"></div></div>
+        <div class="layui-form-item"><label class="layui-form-label">点位题名</label>
+            <div class="layui-input-block"><input class="layui-input" name="content" id="reg-content"></div></div>
+        <div class="layui-form-item"><label class="layui-form-label">来路</label>
+            <div class="layui-input-block">
+                <select name="srcKind" id="reg-srcKind">
+                    <option value="建档岗建">建档岗建</option>
+                    <option value="复测核收带出">复测核收带出</option>
+                </select>
+            </div></div>
+    </form>
+</div>
+</body>
+</html>

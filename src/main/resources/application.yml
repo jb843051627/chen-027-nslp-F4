@@ -21,6 +21,9 @@ fuce:
   roll-verification: false
   # 文件路径 示例（ Windows配置D:/v2/uploadPath，Linux配置 /home/v2/uploadPath）
   profile: D:/v2/uploadPath
+  # 声管岗名册每页几条（分页只认这一处配置，页面上改不了）
+  nslp:
+    page-size: 10
 #tomcat config
 server :
   port : 8080

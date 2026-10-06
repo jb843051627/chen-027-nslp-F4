@@ -30,6 +30,10 @@ public class FlowBatchSubmit implements java.io.Serializable {
     @ApiModelProperty(value = "本拨切法")
     private String parseKind;
 
+    /** 本拨属哪一年度：核收收下的行按这一年度带出点位册行（不填只核收，不带出建行） */
+    @ApiModelProperty(value = "年度（核收后带出建册用）")
+    private Integer annual;
+
     /** 定宽切法的宽度（切法为 FIXED 才用得着） */
     @ApiModelProperty(value = "定宽宽度")
     private Integer fixWidth;
@@ -60,6 +64,14 @@ public class FlowBatchSubmit implements java.io.Serializable {
 
     public void setParseKind(String parseKind) {
         this.parseKind = parseKind;
+    }
+
+    public Integer getAnnual() {
+        return annual;
+    }
+
+    public void setAnnual(Integer annual) {
+        this.annual = annual;
     }
 
     public Integer getFixWidth() {

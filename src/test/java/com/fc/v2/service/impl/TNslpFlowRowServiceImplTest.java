@@ -39,7 +39,12 @@ import com.fc.v2.model.custom.FlowBatchSubmit;
 import com.fc.v2.model.custom.FlowReceipt;
 import com.fc.v2.model.custom.FlowReconcile;
 import com.fc.v2.model.custom.FlowRowSubmit;
+import com.fc.v2.model.custom.PointRegister;
+import com.fc.v2.service.ITNslpFlowRowService;
+import com.fc.v2.service.ITNslpPointService;
 import com.fc.v2.service.support.FlowRowRules;
+import com.fc.v2.service.support.LedgerRejectException;
+import com.fc.v2.service.support.PointLedgerRules;
 
 /**
  * 核收环节测试：四个动作一口气走完、同一批次码再到只照面、回执三个数
@@ -58,6 +63,8 @@ public class TNslpFlowRowServiceImplTest {
     private TNslpFlowBatchMapper flowBatchMapper;
     @Mock
     private TNslpPointMapper pointMapper;
+    @Mock
+    private ITNslpPointService nslpPointService;
     @InjectMocks
     private TNslpFlowRowServiceImpl service;
 
@@ -628,6 +635,54 @@ public class TNslpFlowRowServiceImplTest {
         assertThrows(IllegalArgumentException.class,
                 () -> service.submitBatch(submit(" ", null, "DELIMITER")));
         assertThrows(IllegalArgumentException.class, () -> service.submitBatch(null));
+    }
+
+    @Test
+    public void acceptedRowCarriesOutRegisterThroughSameGate() {
+        final List<PointRegister> carried = new ArrayList<PointRegister>();
+        org.mockito.Mockito.doAnswer(inv -> {
+            carried.add(inv.getArgument(0));
+            TNslpPoint built = new TNslpPoint();
+            built.setId(Long.valueOf(901));
+            built.setPointNo("PT0001");
+            return built;
+        }).when(nslpPointService).registerPoint(org.mockito.ArgumentMatchers.any(PointRegister.class));
+
+        // 拨上带年度：收下且对上底册的行，核收之后走建档同一个口带出建行；
+        // 建档岗一条一条建与复测带出走同一套数量算法，界面不长第二种样子。
+        FlowBatchSubmit s = submit("R1", null, "DELIMITER",
+                row("PT0001", "8", "6", "55.0,56.1"),   // 收下，带出
+                row("PT0002", "0", "0", "55.0"),        // 退回，不带出
+                row("PT9999", "1", "1", "55.0"));       // 底册无此码，不带出
+        s.setAnnual(Integer.valueOf(2026));
+        FlowReceipt receipt = service.submitBatch(s);
+        assertEquals(1, receipt.getAcceptNum());
+
+        assertEquals(1, carried.size());
+        PointRegister reg = carried.get(0);
+        assertEquals("PT0001", reg.getPointNo());
+        assertEquals(Integer.valueOf(2026), reg.getAnnual());
+        assertEquals("QN00", reg.getZoneNo());
+        // 核定沿底册（PT0001 needNum=10），达标取本拨核验通过的 6
+        assertEquals("10", reg.getNeedNum());
+        assertEquals("6", reg.getGotNum());
+        assertEquals(PointLedgerRules.SRC_RETEST, reg.getSrcKind());
+
+        // 带出建行被五筛挡下（如同点已有一行在走）：不回滚核收，回执照样成立
+        carried.clear();
+        org.mockito.Mockito.doThrow(new LedgerRejectException(4, "同点已有一行在走"))
+                .when(nslpPointService).registerPoint(org.mockito.ArgumentMatchers.any(PointRegister.class));
+        FlowBatchSubmit s3 = submit("R3", null, "DELIMITER", row("PT0001", "2", "1", "55"));
+        s3.setAnnual(Integer.valueOf(2026));
+        FlowReceipt r3 = service.submitBatch(s3);
+        assertEquals(FlowReceipt.OUTCOME_ACCEPTED, r3.getOutcome());
+        assertEquals(1, r3.getAcceptNum());
+
+        // 拨上没带年度：只核收，不带出
+        int before = carried.size();
+        FlowBatchSubmit s4 = submit("R4", null, "DELIMITER", row("PT0001", "2", "1", "55"));
+        service.submitBatch(s4);
+        assertEquals(before, carried.size());
     }
 
     private TNslpFlowRow craftRow(String batchNo, int rowNo, int status, int layer,

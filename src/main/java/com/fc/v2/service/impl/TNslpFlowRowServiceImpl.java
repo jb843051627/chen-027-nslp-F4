@@ -23,7 +23,11 @@ import com.fc.v2.model.custom.FlowReceipt;
 import com.fc.v2.model.custom.FlowReconcile;
 import com.fc.v2.model.custom.FlowRowSubmit;
 import com.fc.v2.service.ITNslpFlowRowService;
+import com.fc.v2.service.ITNslpPointService;
+import com.fc.v2.model.custom.PointRegister;
 import com.fc.v2.service.support.FlowRowRules;
+import com.fc.v2.service.support.LedgerRejectException;
+import com.fc.v2.service.support.PointLedgerRules;
 
 /**
  * 监测流水核收 Service业务层处理（batch-process 形状：整批提交）。
@@ -47,6 +51,10 @@ public class TNslpFlowRowServiceImpl implements ITNslpFlowRowService {
 
     @javax.annotation.Resource
     private TNslpPointMapper nslpPointMapper;
+
+    /** 复测核收带出建册：走点位建档同一个口（可空时只核收，不带出） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ITNslpPointService nslpPointService;
 
     @Override
     public TNslpFlowRow selectTNslpFlowRowById(Long id) {
@@ -119,6 +127,12 @@ public class TNslpFlowRowServiceImpl implements ITNslpFlowRowService {
             row.setDelFlag(0);
             this.nslpFlowRowMapper.insert(row);
             decided.add(row);
+
+            // 复测业务在核收之后带出来：收下的行，本年度该册该码还没在册行的，
+            // 走点位建档同一个口带出建行（同点已在册的不另起）；两条来路同一套数量算法。
+            if (reason == null) {
+                carryOutRegister(r, point, submit.getAnnual());
+            }
         }
 
         // 动作四·出回执：三个数从这一趟定完去处的行里一行一行数出来
@@ -327,6 +341,37 @@ public class TNslpFlowRowServiceImpl implements ITNslpFlowRowService {
                 .eq("del_flag", 0)
                 .last("limit 1"));
         return ref == null ? null : ref.getRowNo();
+    }
+
+    /**
+     * 复测业务在核收之后带出来建册：只在拨上带了年度时发生。
+     * 收下且对上底册的行，若本年度该册该码还没有册行，装一份 {@link PointRegister}
+     * 走建档岗同一个口 {@link ITNslpPointService#registerPoint}——五条筛、数量轧算、
+     * 同点名额、界面样子全是同一套，绝不在本处另写第二份算法。
+     * 建档没过不回滚核收：核收这一拨已经定了去处，带出建册是后续动作，记下缘由另办。
+     */
+    private void carryOutRegister(FlowRowSubmit raw, TNslpPoint point, Integer annual) {
+        if (annual == null || nslpPointService == null || point == null) {
+            return;
+        }
+        PointRegister reg = new PointRegister();
+        reg.setPointNo(point.getPointNo());
+        reg.setAnnual(annual);
+        reg.setZoneNo(point.getZoneNo());
+        // 核定应测次数沿底册那一行的核定；达标次数取本拨核验通过的次数，没给按 0
+        reg.setNeedNum(point.getNeedNum() == null ? null : String.valueOf(point.getNeedNum()));
+        reg.setGotNum(raw.getChkNum() == null ? "0" : raw.getChkNum().stripTrailingZeros().toPlainString());
+        reg.setContent(point.getContent());
+        reg.setSrcKind(PointLedgerRules.SRC_RETEST);
+        try {
+            nslpPointService.registerPoint(reg);
+        } catch (LedgerRejectException e) {
+            // 同点已有一行在走等情形：核收照常成立，带出建行被挡的缘由由建档环节另案处理，
+            // 不让建册的拒回把已经核收落账的整拨流水一并卷回。
+            org.slf4j.LoggerFactory.getLogger(TNslpFlowRowServiceImpl.class)
+                    .info("复测带出建册被第{}道筛挡下（点位{}，年度{}）：{}",
+                            Integer.valueOf(e.getScreen()), point.getPointNo(), annual, e.getMessage());
+        }
     }
 
     private TNslpFlowBatch newBatch(String batchNo, int cap, int counted, String parseKind) {

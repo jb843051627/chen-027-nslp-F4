@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <th:block th:include="include :: header('执法文书版次与出文')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <form class="layui-form" id="tpl-form">
+            <div class="layui-form-item">
+                <label class="layui-form-label">文种</label>
+                <div class="layui-input-inline" style="width:160px">
+                    <select name="tplName">
+                        <option value="超标告知">超标告知</option>
+                        <option value="责令限期改正">责令限期改正</option>
+                        <option value="复查结论">复查结论</option>
+                    </select>
+                </div>
+                <label class="layui-form-label">出文一刻</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="at" placeholder="yyyy-MM-dd HH:mm:ss，空按此刻" class="layui-input">
+                </div>
+                <button type="button" class="pear-btn pear-btn-primary pear-btn-md" id="btn-pick">同一刻两问取版</button>
+                <button type="button" class="pear-btn pear-btn-md" id="btn-list">现行清单</button>
+            </div>
+        </form>
+        <div id="pick-result" style="padding:8px;color:#444"></div>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-header">现行可选清单（已撤版不进；照主键仍查得着）</div>
+    <div class="layui-card-body">
+        <table id="tpl-table"></table>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-header">出文（取值只认版次，缺项一项项点名，不发空白纸）</div>
+    <div class="layui-card-body">
+        <form class="layui-form" id="issue-form">
+            <div class="layui-form-item">
+                <label class="layui-form-label">点位行主键</label>
+                <div class="layui-input-inline"><input class="layui-input" name="pointId"></div>
+                <label class="layui-form-label">文种</label>
+                <div class="layui-input-inline" style="width:160px">
+                    <select name="tplName">
+                        <option value="超标告知">超标告知</option>
+                        <option value="责令限期改正">责令限期改正</option>
+                        <option value="复查结论">复查结论</option>
+                    </select>
+                </div>
+                <label class="layui-form-label">出文一刻</label>
+                <div class="layui-input-inline"><input class="layui-input" name="issuedAt" placeholder="空按此刻"></div>
+                <button type="button" class="pear-btn pear-btn-danger pear-btn-md" id="btn-issue">出文</button>
+                <button type="button" class="pear-btn pear-btn-md" id="btn-issues">查这行的出文档案</button>
+            </div>
+        </form>
+        <div id="issue-result" style="padding:8px"></div>
+    </div>
+</div>
+
+<script>
+    layui.use(['table', 'form', 'jquery', 'layer'], function () {
+        let table = layui.table, $ = layui.jquery, layer = layui.layer;
+        let PATH = rootPath + "/NslpDocTplController";
+
+        $('#btn-list').on('click', function () {
+            let f = {};
+            $.each($('#tpl-form').serializeArray(), function (_, kv) { if (kv.value) f[kv.name] = kv.value; });
+            $.get(PATH + '/listActive', f, function (res) {
+                if (res.code !== 200) { layer.msg(res.msg, {icon: 2}); return; }
+                table.render({
+                    elem: '#tpl-table', data: res.data, page: false, skin: 'line',
+                    cols: [[
+                        {title: '主键', field: 'id', width: 160},
+                        {title: '文种', field: 'tplName', width: 140},
+                        {title: '版次（大先开口）', field: 'verNo', width: 140},
+                        {title: '应填项数', field: 'varNum', width: 90},
+                        {title: '已取项数', field: 'fillNum', width: 90},
+                        {title: '还差几项(轧)', field: 'missNum', width: 110},
+                        {title: '起用', field: 'effStart', width: 170},
+                        {title: '交班(不含)', field: 'effEnd', width: 170}
+                    ]]
+                });
+            });
+        });
+
+        $('#btn-pick').on('click', function () {
+            let f = {};
+            $.each($('#tpl-form').serializeArray(), function (_, kv) { if (kv.value) f[kv.name] = kv.value; });
+            $.when(
+                $.get(PATH + '/resolveVersion', f),
+                $.get(PATH + '/resolveTop', f)
+            ).done(function (a, b) {
+                let v1 = a[0].data, v2 = b[0].data;
+                let same = (v1 && v2 && String(v1.id) === String(v2.id));
+                $('#pick-result').html(
+                    '按版次取值 → ' + (v1 ? ('第 ' + v1.verNo + ' 版（主键 ' + v1.id + '）') : '此刻无在位版')
+                    + '；　整表取优 → ' + (v2 ? ('第 ' + v2.verNo + ' 版（主键 ' + v2.id + '）') : '此刻无在位版')
+                    + '；　<b style="color:' + (same ? 'green' : 'red') + '">'
+                    + (same ? '两答同一版（服务端一处给出）' : '两答不同版——异常！') + '</b>');
+            });
+        });
+
+        $('#btn-issue').on('click', function () {
+            let data = $('#issue-form').serialize();
+            $.post(PATH + '/issue', data, function (res) {
+                if (res.code !== 200) { layer.msg(res.msg, {icon: 2, time: 5000}); return; }
+                let d = res.data;
+                $('#issue-result').html('已落档：' + d.tplName + ' 第 ' + d.verNo + ' 版，应填 '
+                    + d.varNum + '、已取 ' + d.fillNum + '、还差 ' + d.missNum
+                    + '，出文一刻 ' + d.issuedAt + '。旧文照当初版次留档，新版不回改。');
+            }).fail(function (xhr) {
+                let m = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : xhr.responseText;
+                $('#issue-result').html('<span style="color:#c00">' + m + '</span>');
+            });
+        });
+
+        $('#btn-issues').on('click', function () {
+            let pointId = $('#issue-form input[name="pointId"]').val();
+            $.get(PATH + '/listIssues', {pointId: pointId}, function (res) {
+                if (res.code !== 200) { layer.msg(res.msg, {icon: 2}); return; }
+                let rows = res.data || [];
+                let html = rows.map(function (i) {
+                    return i.issuedAt + '　' + i.tplName + '　第 ' + i.verNo + ' 版（应填'
+                        + i.varNum + '/已取' + i.fillNum + '/差' + i.missNum + '）';
+                }).join('<br>');
+                $('#issue-result').html(html || '这一行还没出过文');
+            });
+        });
+    });
+</script>
+</body>
+</html>

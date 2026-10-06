@@ -67,6 +67,32 @@ CREATE TABLE IF NOT EXISTS t_nslp_doc_tpl (
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='执法文书模板与版次';
 
+-- 出了文的每一纸都在档上留一份快照：出文那一刻照的是哪一版，就把那版的
+-- 版次、应填/已取项数连同样张行一起钉在档上。往后新立一版只供新文，
+-- 绝不回改旧档（前年新版措辞回灌旧文那类事，一道堵死）。
+CREATE TABLE IF NOT EXISTS t_nslp_doc_issue (
+  id bigint NOT NULL COMMENT '主键',
+  point_id bigint DEFAULT NULL COMMENT '照哪一行点位出的文 t_nslp_point.id',
+  point_no varchar(64) DEFAULT NULL COMMENT '出文时点位码（冗余自点位行）',
+  tpl_id bigint DEFAULT NULL COMMENT '出文那一刻照的那一版主键 t_nslp_doc_tpl.id',
+  tpl_no varchar(64) DEFAULT NULL COMMENT '文书模板代号（快照）',
+  tpl_name varchar(128) DEFAULT NULL COMMENT '文种名（快照：超标告知·责令限期改正·复查结论）',
+  ver_no int DEFAULT NULL COMMENT '版次（出文那一刻的开口版，钉死）',
+  var_num int DEFAULT NULL COMMENT '本版应填项数（快照）',
+  fill_num int DEFAULT NULL COMMENT '已取到值的项数（快照）',
+  miss_num int DEFAULT NULL COMMENT '还差几项（快照：var-fill）',
+  issued_at datetime DEFAULT NULL COMMENT '出文那一刻（选版就看这一刻在不在线）',
+  del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
+  create_by varchar(64) DEFAULT NULL COMMENT '创建者（谁出的文）',
+  create_time datetime DEFAULT NULL COMMENT '创建时间',
+  update_by varchar(64) DEFAULT NULL COMMENT '更新者',
+  update_time datetime DEFAULT NULL COMMENT '更新时间',
+  remark varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (id),
+  KEY idx_issue_point (point_id),
+  KEY idx_issue_tpl (tpl_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='执法文书出文档案（一纸一版，钉住出文那一刻的版次快照）';
+
 CREATE TABLE IF NOT EXISTS t_nslp_flow_batch (
   id bigint NOT NULL COMMENT '主键',
   batch_no varchar(64) DEFAULT NULL COMMENT '监测流水批次码（一拨一码；同一码第二回到达只照面，不另起一拨）',
@@ -147,25 +173,48 @@ CREATE TABLE IF NOT EXISTS t_nslp_permit_bill (
 
 CREATE TABLE IF NOT EXISTS t_nslp_point (
   id bigint NOT NULL COMMENT '主键',
-  point_no varchar(64) DEFAULT NULL COMMENT '点位码',
+  point_no varchar(64) DEFAULT NULL COMMENT '点位码（随报送材料进来，系统不另发第二串，也不核对构成规矩）',
+  annual int DEFAULT NULL COMMENT '年度（同一年度同一区册底下去重点位码；旧纸簿搬进来的留空）',
   zone_id int DEFAULT NULL COMMENT '挂在哪一个区册名下',
-  zone_no varchar(64) DEFAULT NULL COMMENT '区册代号（冗余自区册）',
-  src_kind varchar(128) DEFAULT NULL COMMENT '来路（自动站／移动监测车／人工核查三条来路）',
+  zone_no varchar(64) DEFAULT NULL COMMENT '区册代号（冗余自区册，以区册底为准改齐）',
+  zone_name varchar(128) DEFAULT NULL COMMENT '区册全称（冗余自区册；对不齐时以区册为准把本行改过来）',
+  src_kind varchar(128) DEFAULT NULL COMMENT '来路（建档岗一条一条建／复测业务核收后带出，两边同一套算法同一个样子）',
   need_num int DEFAULT NULL COMMENT '核定应测次数',
   got_num int DEFAULT NULL COMMENT '已核验达标的次数',
-  lack_num int DEFAULT NULL COMMENT '还差几回（轧出来，不手填）',
+  lack_num int DEFAULT NULL COMMENT '还差几回（轧出来，不手填：need-got，每回写库之前重轧）',
   content varchar(255) DEFAULT NULL COMMENT '随件交来的点位题名与依附声源',
   status int DEFAULT NULL COMMENT '册面情形 0新入册 1已核齐 2缺项',
+  walk_status int DEFAULT NULL COMMENT '在走三态 0待测 1已测 2压卡（旧纸簿搬进来的留空，不算压卡）',
+  halted int DEFAULT 0 COMMENT '就地叫停 0在走 1已叫停（叫停腾出同点位名额；压卡也腾名额）',
   pinned_rule_code varchar(64) DEFAULT NULL COMMENT '归层钉住的限值线代号（不归层清空白，追得出当年照哪条线）',
   pinned_eff_start datetime DEFAULT NULL COMMENT '归层钉住的起用那一一日（不归层清空白）',
   del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
-  create_by varchar(64) DEFAULT NULL COMMENT '创建者',
+  create_by varchar(64) DEFAULT NULL COMMENT '创建者（谁建的册，复核点得出落笔人）',
   create_time datetime DEFAULT NULL COMMENT '创建时间',
-  update_by varchar(64) DEFAULT NULL COMMENT '更新者',
+  update_by varchar(64) DEFAULT NULL COMMENT '更新者（谁改的行，复核点得出落笔人）',
   update_time datetime DEFAULT NULL COMMENT '更新时间',
   remark varchar(500) DEFAULT NULL COMMENT '备注',
-  PRIMARY KEY (id)
+  PRIMARY KEY (id),
+  KEY idx_point_open (point_no, annual, zone_no, walk_status, halted, del_flag)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='声环境监测点位底册';
+
+-- 点位在走留痕：待测→已测→压卡的每一步按时序压在点位行身后。
+-- 收回重来时先前那一趟的记录照旧留着，不抹、不跟后补的并排；
+-- 这一行眼下走到哪一步，由系统依这一串已走步数自行数出，屏上写的、人记的都不作依据。
+CREATE TABLE IF NOT EXISTS t_nslp_point_trail (
+  id bigint NOT NULL COMMENT '主键',
+  point_id bigint NOT NULL COMMENT '所随点位 t_nslp_point.id',
+  step int DEFAULT NULL COMMENT '落笔那一刻所处步数 0待测 1已测 2压卡',
+  action varchar(32) DEFAULT NULL COMMENT '动作 建行/推进/收回/叫停/压卡',
+  trail_time datetime DEFAULT NULL COMMENT '提交那一刻（同刻两笔各记各的先后）',
+  seq int DEFAULT NULL COMMENT '同刻先后次序（trail_time 并列时以本列断先后）',
+  note varchar(500) DEFAULT NULL COMMENT '这一笔留下的话',
+  del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
+  create_by varchar(64) DEFAULT NULL COMMENT '创建者',
+  create_time datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY idx_point_trail (point_id, trail_time, seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='点位在走留痕（步由这一串放出来，不许另算）';
 
 CREATE TABLE IF NOT EXISTS t_nslp_task_item (
   id bigint NOT NULL COMMENT '主键',

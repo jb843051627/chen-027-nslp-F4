@@ -31,10 +31,15 @@ public class TNslpPoint implements Serializable {
     @ApiModelProperty(value = "主键")
     private Long id;
 
-    /** 点位码 */
+    /** 点位码（随报送材料进来，系统不另发第二串，也不核对构成规矩） */
     @TableField("point_no")
     @ApiModelProperty(value = "点位码")
     private String pointNo;
+
+    /** 年度（同一年度同一区册底下去重点位码；旧纸簿搬进来的留空） */
+    @TableField("annual")
+    @ApiModelProperty(value = "年度")
+    private Integer annual;
 
     /** 挂在哪一个区册名下 */
     @TableField("zone_id")
@@ -46,9 +51,14 @@ public class TNslpPoint implements Serializable {
     @ApiModelProperty(value = "区册代号（冗余自区册）")
     private String zoneNo;
 
-    /** 来路（自动站／移动监测车／人工核查三条来路） */
+    /** 区册全称（冗余自区册；对不齐时以区册为准改齐本行） */
+    @TableField("zone_name")
+    @ApiModelProperty(value = "区册全称（冗余自区册）")
+    private String zoneName;
+
+    /** 来路（建档岗一条一条建／复测业务核收之后带出来；两边同一套算法同一个样子） */
     @TableField("src_kind")
-    @ApiModelProperty(value = "来路（自动站／移动监测车／人工核查三条来路）")
+    @ApiModelProperty(value = "来路（建档岗建／复测核收带出）")
     private String srcKind;
 
     /** 核定应测次数 */
@@ -75,6 +85,16 @@ public class TNslpPoint implements Serializable {
     @TableField("status")
     @ApiModelProperty(value = "册面情形 0新入册 1已核齐 2缺项")
     private Integer status;
+
+    /** 在走三态 0待测 1已测 2压卡（旧纸簿搬进来的留空，留空不算压卡） */
+    @TableField("walk_status")
+    @ApiModelProperty(value = "在走三态 0待测 1已测 2压卡，旧纸簿行留空")
+    private Integer walkStatus;
+
+    /** 就地叫停 0在走 1已叫停（叫停腾出同点位名额；压卡同样腾名额） */
+    @TableField("halted")
+    @ApiModelProperty(value = "就地叫停 0在走 1已叫停")
+    private Integer halted;
 
     /** 归层时钉住的线代号；不归层清成空白（日后追得出当年照的是哪条线） */
     @TableField("pinned_rule_code")
@@ -135,12 +155,28 @@ public class TNslpPoint implements Serializable {
         this.pointNo = pointNo;
     }
 
+    public Integer getAnnual() {
+        return annual;
+    }
+
+    public void setAnnual(Integer annual) {
+        this.annual = annual;
+    }
+
     public Integer getZoneId() {
         return zoneId;
     }
 
     public void setZoneId(Integer zoneId) {
         this.zoneId = zoneId;
+    }
+
+    public String getZoneName() {
+        return zoneName;
+    }
+
+    public void setZoneName(String zoneName) {
+        this.zoneName = zoneName;
     }
 
     public String getZoneNo() {
@@ -197,6 +233,22 @@ public class TNslpPoint implements Serializable {
 
     public void setStatus(Integer status) {
         this.status = status;
+    }
+
+    public Integer getWalkStatus() {
+        return walkStatus;
+    }
+
+    public void setWalkStatus(Integer walkStatus) {
+        this.walkStatus = walkStatus;
+    }
+
+    public Integer getHalted() {
+        return halted;
+    }
+
+    public void setHalted(Integer halted) {
+        this.halted = halted;
     }
 
     public String getPinnedRuleCode() {
