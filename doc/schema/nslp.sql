@@ -207,3 +207,67 @@ INSERT IGNORE INTO t_nslp_zone_book (id, zone_no, zone_name, zone_kind, road_nam
 VALUES (0, 'QN00', '澜原省江水市云桥区临江片区（甲层住宅类，在册）', '甲层', '澜原省—江水市—云桥区—临江片区', 0, 0, 'seed', NOW()),
        (1, 'QN01', '南津区北岸片区·并走撤出的旧区册（已撤出）', '乙层', '澜原省—江水市—南津区—北岸片区', 1, 0, 'seed', NOW());
 
+-- ============================================================================
+-- 建档 + 三态 + 版次出文：在旧表上加列、另立新表，旧列一条不动。
+-- 列名与基线实体契约逐列对齐，改列必须同步实体。
+-- ============================================================================
+
+-- 点位底册加五列：
+-- reg_year   年度。同一年度、同一区册底下，同点位码只许一条在走的行。
+-- zone_name  区册全称（冗余自区册）。与区册底对不齐时以区册为准改这一行，两处各留一份说法。
+-- flow_stage 三态当前步：0待测 1已测 2压卡；步数只由 t_nslp_point_step 那串放出来，
+--            本行这一格只是回放后写回的结果。早年间纸质簿搬进来的旧行留空——空不当已压卡。
+-- stop_flag  就地叫停：0在走 1已叫停。叫停与压卡一样腾出同点位名额，但不是压卡、
+--            行仍在册、照常列得出来。
+-- maintain_unit 递材料的维护单位（同一点位两家维护单位同日各报，仍只许一条在走）。
+ALTER TABLE t_nslp_point
+  ADD COLUMN reg_year int DEFAULT NULL COMMENT '年度（同一年度同一区册同码只许一条在走）' AFTER zone_no,
+  ADD COLUMN zone_name varchar(128) DEFAULT NULL COMMENT '区册全称（冗余自区册，以区册为准对齐）' AFTER zone_no,
+  ADD COLUMN flow_stage int DEFAULT NULL COMMENT '三态当前步 0待测 1已测 2压卡；旧行留空，空不当已压卡' AFTER status,
+  ADD COLUMN stop_flag int DEFAULT 0 COMMENT '就地叫停 0在走 1已叫停（腾名额但非压卡，行仍在册）' AFTER flow_stage,
+  ADD COLUMN maintain_unit varchar(128) DEFAULT NULL COMMENT '递材料的维护单位' AFTER src_kind,
+  ADD KEY idx_point_live (reg_year, zone_no, point_no, flow_stage, stop_flag, del_flag);
+
+-- 点位三态留痕：每推进一步／退回一步／压卡／叫停都压一笔，按时序排在行身后。
+-- 当下走到哪一步只由这一串放出来（屏上写的档、经办人心里记的档都不作依据）。
+-- 退回重来时先前那一趟的记录照旧留着，不与后补的并成一排。
+CREATE TABLE IF NOT EXISTS t_nslp_point_step (
+  id bigint NOT NULL COMMENT '主键',
+  point_id bigint NOT NULL COMMENT '所随点位 t_nslp_point.id',
+  step_no int DEFAULT NULL COMMENT '落笔那一刻走到的步 0待测 1已测 2压卡',
+  action varchar(16) DEFAULT NULL COMMENT '动作 起册/推进/退回/压卡/叫停',
+  note varchar(500) DEFAULT NULL COMMENT '这一笔留下的话',
+  step_time datetime DEFAULT NULL COMMENT '提交那一刻（同刻两笔各记各的先后）',
+  seq int DEFAULT NULL COMMENT '同刻先后次序（step_time 并列时以本列断先后）',
+  del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
+  create_by varchar(64) DEFAULT NULL COMMENT '创建者',
+  create_time datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY idx_point_step (point_id, step_time, seq)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='点位三态留痕（一步一笔，档由这一串放出来）';
+
+-- 文书出文留档：一纸文书落一次档。出文照哪一版取值，落笔时把那一版主键、版次、
+-- 三个数钉在本档；往后新立一版不回改旧档（前年新版措辞回灌旧文的事今后一处也不许有）。
+CREATE TABLE IF NOT EXISTS t_nslp_doc_issue (
+  id bigint NOT NULL COMMENT '主键',
+  tpl_name varchar(128) DEFAULT NULL COMMENT '文种名（超标告知·责令限期改正·复查结论）',
+  tpl_id bigint DEFAULT NULL COMMENT '出文那一刻开口的那一版 t_nslp_doc_tpl.id（钉住，不随新版改）',
+  ver_no int DEFAULT NULL COMMENT '当版版次（落笔钉住）',
+  point_id bigint DEFAULT NULL COMMENT '所对点位 t_nslp_point.id',
+  point_no varchar(64) DEFAULT NULL COMMENT '所对点位码',
+  var_num int DEFAULT NULL COMMENT '本版应填项数（落笔时的快照）',
+  fill_num int DEFAULT NULL COMMENT '已取到值的项数（落笔时的快照）',
+  miss_num int DEFAULT NULL COMMENT '还差几项（落笔时由前两个轧出，钉住）',
+  issue_time datetime DEFAULT NULL COMMENT '出文那一刻（选版只认这一刻）',
+  status int DEFAULT 0 COMMENT '出文情形 0已出',
+  del_flag int DEFAULT '0' COMMENT '删除标记 0正常 1删除',
+  create_by varchar(64) DEFAULT NULL COMMENT '创建者（谁出的文，留得下来）',
+  create_time datetime DEFAULT NULL COMMENT '创建时间',
+  update_by varchar(64) DEFAULT NULL COMMENT '更新者',
+  update_time datetime DEFAULT NULL COMMENT '更新时间',
+  remark varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (id),
+  KEY idx_issue_tpl (tpl_name, issue_time),
+  KEY idx_issue_point (point_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='执法文书出文留档（一纸一档，版次钉住不回改）';
+

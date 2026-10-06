@@ -21,6 +21,10 @@ fuce:
   roll-verification: false
   # 文件路径 示例（ Windows配置D:/v2/uploadPath，Linux配置 /home/v2/uploadPath）
   profile: D:/v2/uploadPath
+  # 声管岗名册相关
+  nslp:
+    # 名册每页几条（由区局写定；空着/非正/离谱按 10 认）
+    ledger-page-size: 10
 #tomcat config
 server :
   port : 8080

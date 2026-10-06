@@ -46,10 +46,25 @@ public class TNslpPoint implements Serializable {
     @ApiModelProperty(value = "区册代号（冗余自区册）")
     private String zoneNo;
 
+    /** 区册全称（冗余自区册，对不齐时以区册为准改这一行） */
+    @TableField("zone_name")
+    @ApiModelProperty(value = "区册全称（冗余自区册，以区册为准对齐）")
+    private String zoneName;
+
+    /** 年度（同一年度同一区册同码只许一条在走） */
+    @TableField("reg_year")
+    @ApiModelProperty(value = "年度（同一年度同一区册同码只许一条在走）")
+    private Integer regYear;
+
     /** 来路（自动站／移动监测车／人工核查三条来路） */
     @TableField("src_kind")
     @ApiModelProperty(value = "来路（自动站／移动监测车／人工核查三条来路）")
     private String srcKind;
+
+    /** 递材料的维护单位 */
+    @TableField("maintain_unit")
+    @ApiModelProperty(value = "递材料的维护单位")
+    private String maintainUnit;
 
     /** 核定应测次数 */
     @TableField("need_num")
@@ -75,6 +90,16 @@ public class TNslpPoint implements Serializable {
     @TableField("status")
     @ApiModelProperty(value = "册面情形 0新入册 1已核齐 2缺项")
     private Integer status;
+
+    /** 三态当前步 0待测 1已测 2压卡；旧行留空，空不当已压卡 */
+    @TableField("flow_stage")
+    @ApiModelProperty(value = "三态当前步 0待测 1已测 2压卡；旧行留空")
+    private Integer flowStage;
+
+    /** 就地叫停 0在走 1已叫停（腾名额但非压卡，行仍在册） */
+    @TableField("stop_flag")
+    @ApiModelProperty(value = "就地叫停 0在走 1已叫停")
+    private Integer stopFlag;
 
     /** 归层时钉住的线代号；不归层清成空白（日后追得出当年照的是哪条线） */
     @TableField("pinned_rule_code")
@@ -151,12 +176,36 @@ public class TNslpPoint implements Serializable {
         this.zoneNo = zoneNo;
     }
 
+    public String getZoneName() {
+        return zoneName;
+    }
+
+    public void setZoneName(String zoneName) {
+        this.zoneName = zoneName;
+    }
+
+    public Integer getRegYear() {
+        return regYear;
+    }
+
+    public void setRegYear(Integer regYear) {
+        this.regYear = regYear;
+    }
+
     public String getSrcKind() {
         return srcKind;
     }
 
     public void setSrcKind(String srcKind) {
         this.srcKind = srcKind;
+    }
+
+    public String getMaintainUnit() {
+        return maintainUnit;
+    }
+
+    public void setMaintainUnit(String maintainUnit) {
+        this.maintainUnit = maintainUnit;
     }
 
     public Integer getNeedNum() {
@@ -197,6 +246,22 @@ public class TNslpPoint implements Serializable {
 
     public void setStatus(Integer status) {
         this.status = status;
+    }
+
+    public Integer getFlowStage() {
+        return flowStage;
+    }
+
+    public void setFlowStage(Integer flowStage) {
+        this.flowStage = flowStage;
+    }
+
+    public Integer getStopFlag() {
+        return stopFlag;
+    }
+
+    public void setStopFlag(Integer stopFlag) {
+        this.stopFlag = stopFlag;
     }
 
     public String getPinnedRuleCode() {
